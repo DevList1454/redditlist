@@ -24,9 +24,9 @@ To use this script, you will need a userscript manager installed in your browser
 
 ## Installation
 
-1. Go to https://github.com/DevList1454/redditlist/raw/refs/heads/main/infoscraper.user.js
+1. Go to [https://github.com/DevList1454/redditlist/raw/refs/heads/main/infoscraper.user.js](https://github.com/DevList1454/redditlist/raw/refs/heads/main/infoscraper.user.js)
 2. Click **Install**.
-3. Go to old.reddit.com
+3. Go to [old.reddit.com](https://old.reddit.com)
 4. Button "scraper" appears in top bar to open UI
 
 ---
