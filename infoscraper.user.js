@@ -1,5 +1,5 @@
 // ==UserScript==
-// @name         Reddit Info Scraper
+// @name         Subreddit Info Scraper v2
 // @namespace    http://tampermonkey.net/
 // @version      2.0.0
 // @description  Scrapes subreddit status, UI integrated into reddit, Pause/Resume, extracts ban dates and reason, generate reports in Markdown format.
