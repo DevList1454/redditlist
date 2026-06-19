@@ -29,6 +29,42 @@ To use this script, you will need a userscript manager installed in your browser
 3. Go to [old.reddit.com](https://old.reddit.com)
 4. Button "scraper v2" appears in top bar to open UI
 
+## Browser Compatibility
+
+This script works in both Firefox and Chrome, but Chrome requires a one-time
+setup step before it will run.
+
+### Chrome Setup (Required)
+
+From Chrome 138, Google changed how userscripts are permitted to run. Rather
+than a global Developer Mode toggle, each extension that runs userscripts now
+has its own **Allow User Scripts** switch that defaults to **off** for any newly
+installed extension, including Tampermonkey.
+
+If the script appears to do nothing in Chrome (no nav link, no panel), this is
+almost certainly why.
+
+**To fix it:**
+
+1. Go to `chrome://extensions`
+2. Find **Tampermonkey** and click **Details**
+3. Scroll down and enable the **Allow User Scripts** toggle
+4. Reload any open old.reddit.com tabs
+
+You only need to do this once. The setting persists across browser restarts.
+
+> **Note:** If you installed Tampermonkey before Chrome 138 and already had
+> Developer Mode enabled, Chrome may have migrated the setting for you
+> automatically. If the script was working before and suddenly stopped after a
+> Chrome update, revisit the steps above and check the toggle is still on.
+
+### Firefox
+
+No extra steps needed, the script installs and runs via Tampermonkey as normal.
+
+For more detail on why Chrome made this change, see the
+[Chrome developer blog post](https://developer.chrome.com/blog/chrome-userscript).
+
 ---
 
 ## Getting Started: First Run & Initial Setup
