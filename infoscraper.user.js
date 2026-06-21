@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Subreddit Info Scraper v2
 // @namespace    http://tampermonkey.net/
-// @version      2.0.5
+// @version      2.1.5
 // @description  Scrapes subreddit status, UI integrated into reddit, Pause/Resume, extracts ban dates and reason, generate reports in Markdown format.
 // @match        https://old.reddit.com/*
 // @grant        GM_setValue
@@ -25,15 +25,6 @@
     // htm lets us write JSX-like syntax in plain JS template literals, bound to React.createElement
     const html = htm.bind(React.createElement);
     const { useState, useEffect, useRef, useMemo } = React;
-
-    // Central colour palette — update these to retheme the entire UI
-    const COLOR = {
-        PRIMARY:  "#0079D3",
-        SUCCESS:  "#28a745",
-        WARNING:  "#ffc107",
-        ERROR:    "#cc3600",
-        DISABLED: "#ccc"
-    };
 
     // For keyword matching when fetching ban data
     const BAN_REASONS = [
@@ -68,6 +59,64 @@
 
     const style = document.createElement('style');
     style.textContent = `
+        .rs-panel {
+            /* Light theme defaults */
+            --rs-bg:               #ffffff;
+            --rs-surface:          #f8fafc;
+            --rs-surface-alt:      #f1f5f9;
+            --rs-border:           #e2e8f0;
+            --rs-border-strong:    #cbd5e1;
+            --rs-border-table:     #e2e8f0;
+            --rs-text:             #1e293b;
+            --rs-text-muted:       #64748b;
+            --rs-text-secondary:   #475569;
+            --rs-text-heading:     #0f172a;
+            --rs-input-bg:         #ffffff;
+            --rs-input-border:     #cbd5e1;
+            --rs-link:             #3b82f6;
+            --rs-shadow:           rgba(15, 23, 42, 0.12);
+
+            /* Action colours — same across both themes */
+            --rs-primary:          #3b82f6;
+            --rs-success:          #10b981;
+            --rs-warning:          #f59e0b;
+            --rs-error:            #ef4444;
+            --rs-disabled:         #e2e8f0;
+            --rs-disabled-text:    #94a3b8;
+
+            /* Semantic colours for log entries and diff columns */
+            --rs-color-positive:   #16a34a;
+            --rs-color-negative:   #dc2626;
+            --rs-color-caution:    #d97706;
+            --rs-color-flags:      #dc2626;
+        }
+
+        .rs-panel.rs-dark {
+            /* Dark theme overrides */
+            --rs-bg:               #0f172a;
+            --rs-surface:          #1e293b;
+            --rs-surface-alt:      #162032;
+            --rs-border:           #334155;
+            --rs-border-strong:    #475569;
+            --rs-border-table:     #334155;
+            --rs-text:             #e2e8f0;
+            --rs-text-muted:       #94a3b8;
+            --rs-text-secondary:   #94a3b8;
+            --rs-text-heading:     #f8fafc;
+            --rs-input-bg:         #1e293b;
+            --rs-input-border:     #475569;
+            --rs-link:             #60a5fa;
+            --rs-shadow:           rgba(0, 0, 0, 0.4);
+            --rs-disabled:         #334155;
+            --rs-disabled-text:    #64748b;
+
+            /* Brighter variants that read clearly on dark backgrounds */
+            --rs-color-positive:   #4ade80;
+            --rs-color-negative:   #f87171;
+            --rs-color-caution:    #fbbf24;
+            --rs-color-flags:      #f87171;
+        }
+
         /* Outer panel — fixed so it floats above the Reddit page */
         .rs-panel {
             position: fixed;
@@ -75,15 +124,15 @@
             right: 20px;
             width: 900px;
             height: 650px;
-            background: white;
+            background: var(--rs-bg);
+            color: var(--rs-text);
             z-index: 999999;
-            border: 1px solid #ccc;
+            border: 1px solid var(--rs-border-strong);
             border-radius: 8px;
-            box-shadow: 0 4px 16px rgba(0,0,0,0.2);
+            box-shadow: 0 4px 16px var(--rs-shadow);
             display: flex;
             flex-direction: column;
             font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-            color: #333;
         }
 
         /* Title bar */
@@ -92,15 +141,15 @@
             justify-content: space-between;
             align-items: center;
             padding: 15px;
-            border-bottom: 1px solid #eee;
+            border-bottom: 1px solid var(--rs-border);
         }
-        .rs-header h3 { margin: 0; font-size: 18px; color: #1c1c1c; }
+        .rs-header h3 { margin: 0; font-size: 18px; color: var(--rs-text-heading); }
         .rs-close { background: none; border: none; color: #ff4500; font-size: 18px; cursor: pointer; font-weight: bold; }
 
         /* Tab bar */
-        .rs-tabs { display: flex; border-bottom: 2px solid #eee; background: #fafafa; }
-        .rs-tab { flex: 1; padding: 10px; border: none; background: none; cursor: pointer; color: #666; font-weight: 500; }
-        .rs-tab.active { border-bottom: 2px solid ${COLOR.PRIMARY}; color: ${COLOR.PRIMARY}; font-weight: bold; }
+        .rs-tabs { display: flex; border-bottom: 2px solid var(--rs-border); background: var(--rs-surface-alt); }
+        .rs-tab { flex: 1; padding: 10px; border: none; background: none; cursor: pointer; color: var(--rs-text-muted); font-weight: 500; }
+        .rs-tab.active { border-bottom: 2px solid var(--rs-primary); color: var(--rs-primary); font-weight: bold; }
 
         /* Main content area — each tab fills this space */
         .rs-content { padding: 15px; flex-grow: 1; display: flex; flex-direction: column; overflow: hidden; }
@@ -122,15 +171,19 @@
             font-size: 13px;
             margin-bottom: 5px;
         }
-        .rs-btn:disabled { background: ${COLOR.DISABLED} !important; cursor: not-allowed; color: #666 !important; }
+        .rs-btn:disabled {
+            background: var(--rs-disabled) !important;
+            cursor: not-allowed;
+            color: var(--rs-disabled-text) !important;
+        }
 
         /* Scrollable log output on the Dashboard tab */
         .rs-log {
             flex-grow: 1;
-            background: #f6f7f8;
+            background: var(--rs-surface);
             padding: 10px;
             border-radius: 4px;
-            border: 1px solid #eee;
+            border: 1px solid var(--rs-border);
             overflow-y: auto;
             font-family: monospace;
             font-size: 12px;
@@ -138,19 +191,32 @@
         }
 
         /* Scrollable data table on the Data tab */
-        .rs-table-container { overflow: auto; flex-grow: 1; border: 1px solid #eee; border-radius: 4px; }
+        .rs-table-container { overflow: auto; flex-grow: 1; border: 1px solid var(--rs-border); border-radius: 4px; }
         .rs-table { width: 100%; border-collapse: collapse; font-size: 12px; text-align: left; }
-        .rs-table th { background: #f6f7f8; position: sticky; top: 0; padding: 8px; border-bottom: 1px solid #ddd; z-index: 2; }
-        .rs-table td { padding: 8px; border-bottom: 1px solid #eee; }
+        .rs-table th { background: var(--rs-surface); color: var(--rs-text); position: sticky; top: 0; padding: 8px; border-bottom: 1px solid var(--rs-border-table); z-index: 2; }
+        .rs-table td { padding: 8px; border-bottom: 1px solid var(--rs-border); }
 
         /* Labelled input fields used in Quick Add and Settings */
         .rs-input-group { margin-bottom: 15px; }
-        .rs-input-group label { display: block; font-size: 12px; font-weight: bold; margin-bottom: 5px; }
-        .rs-input-group input { width: 100%; padding: 8px; border: 1px solid #ccc; border-radius: 4px; box-sizing: border-box; font-family: inherit; }
+        .rs-input-group label { display: block; font-size: 12px; font-weight: bold; margin-bottom: 5px; color: var(--rs-text); }
+        .rs-input-group input {
+            width: 100%;
+            padding: 8px;
+            border: 1px solid var(--rs-input-border);
+            border-radius: 4px;
+            box-sizing: border-box;
+            font-family: inherit;
+            background: var(--rs-input-bg);
+            color: var(--rs-text);
+        }
 
         /* Row of equally-spaced action buttons pinned to the bottom of a tab */
         .rs-action-row { display: flex; gap: 10px; margin-top: 10px; }
         .rs-action-row .rs-btn { flex: 1; margin-bottom: 0; }
+
+        /* Theme toggle button pair in Settings */
+        .rs-theme-toggle { display: flex; gap: 10px; }
+        .rs-theme-toggle .rs-btn { flex: 1; margin-bottom: 0; }
     `;
     document.head.appendChild(style);
 
@@ -166,7 +232,7 @@
      * Computes:
      *   - Status flags  (R / B / Q / P / N / U)
      *   - Rank change   vs. the previous scrape
-     *   - Subscriber Δ  vs. the previous scrape
+     *   - Subscriber delta vs. the previous scrape
      *
      * @param {object} current     - Data freshly scraped for this subreddit.
      * @param {object} previous    - Last committed snapshot (may be an empty object).
@@ -231,7 +297,7 @@
         const subLink = `[r/${item.subreddit}](/r/${item.subreddit})`;
 
         if (listType === 'banned') {
-            return `|${subLink}|${item.flags}|${formattedDesc}|${item.banDate || 'Unknown'}|${item.banReason || 'Unknown'}`;
+            return `|${subLink}|${item.flags}|${formattedDesc}|${item.banDate || 'Unknown'}|${item.banReason || 'Unknown'}|`;
         }
 
         if (listType === 'alphabetical') {
@@ -250,9 +316,12 @@
 
     /** Fixed title bar with the close button. */
     function Header({ setIsVisible }) {
+        // Grab the version from Tampermonkey, with a fallback just in case
+        const version = typeof GM_info !== 'undefined' ? GM_info.script.version : 'dev';
+
         return html`
             <div className="rs-header">
-                <h3>Subreddit Info Scraper v2</h3>
+                <h3>Subreddit Info Scraper v${version}</h3>
                 <button className="rs-close" onClick=${() => setIsVisible(false)}>✖</button>
             </div>
         `;
@@ -300,7 +369,7 @@
 
                 <button
                     className="rs-btn"
-                    style=${{ background: subCount === 0 ? COLOR.DISABLED : btnBg, color: textColor }}
+                    style=${{ background: subCount === 0 ? 'var(--rs-disabled)' : btnBg, color: textColor }}
                     disabled=${subCount === 0}
                     onClick=${handleToggle}
                 >
@@ -322,7 +391,7 @@
                     ${REPORTS.map(({ type, label }) => html`
                         <button key=${type}
                                 className="rs-btn"
-                                style=${{ background: hasResults ? COLOR.PRIMARY : COLOR.DISABLED }}
+                                style=${{ background: hasResults ? 'var(--rs-primary)' : 'var(--rs-disabled)' }}
                                 disabled=${!hasResults}
                                 onClick=${() => generateMarkdown(type)}>
                             ${label}
@@ -331,7 +400,7 @@
 
                     <button
                         className="rs-btn"
-                        style=${{ background: status === 'DONE' && hasResults ? COLOR.SUCCESS : COLOR.DISABLED }}
+                        style=${{ background: status === 'DONE' && hasResults ? 'var(--rs-success)' : 'var(--rs-disabled)' }}
                         disabled=${status !== 'DONE' || !hasResults}
                         onClick=${commitResults}
                     >
@@ -354,14 +423,14 @@
 
                 <div style=${{ display: 'flex', gap: '10px', marginBottom: '15px' }}>
 
-                    <label className="rs-btn" style=${{ flex: 1, background: COLOR.PRIMARY, cursor: 'pointer' }}>
+                    <label className="rs-btn" style=${{ flex: 1, background: 'var(--rs-primary)', cursor: 'pointer' }}>
                         📂 Load CSV Database
                         <input type="file" accept=".csv" style=${{ display: 'none' }} onChange=${handleCSVUpload} />
                     </label>
 
                     <button
                         className="rs-btn"
-                        style=${{ flex: 1, background: COLOR.PRIMARY }}
+                        style=${{ flex: 1, background: 'var(--rs-primary)' }}
                         disabled=${subCount === 0}
                         onClick=${handleDownloadCSV}
                     >
@@ -386,30 +455,30 @@
                             </tr>
                         </thead>
                         <tbody>
-                            ${processedList.map((row, i) => {
-                                // Colour-code diffs: green = up/gain, red = down/loss, grey = no change
-                                const diffColor = row.diff > 0 ? 'green' : (row.diff < 0 ? 'red' : '#999');
-                                const subDiffColor = row.subDiff > 0 ? 'green' : (row.subDiff < 0 ? 'red' : '#555');
+                            ${processedList.map((row) => {
+                                // Colour-code diffs: green = up/gain, red = down/loss, muted = no change
+                                const diffColor = row.diff > 0 ? 'var(--rs-color-positive)' : (row.diff < 0 ? 'var(--rs-color-negative)' : 'var(--rs-text-muted)');
+                                const subDiffColor = row.subDiff > 0 ? 'var(--rs-color-positive)' : (row.subDiff < 0 ? 'var(--rs-color-negative)' : 'var(--rs-text-secondary)');
 
-                                let subDiffText = row.subDiff > 0
+                                const subDiffText = row.subDiff > 0
                                     ? `+${row.subDiff.toLocaleString()}`
                                     : row.subDiff.toLocaleString();
 
                                 return html`
-                                    <tr key=${i}>
+                                    <tr key=${row.subreddit}>
                                         <td style=${{ textAlign: 'center', fontWeight: 'bold' }}>${row.currentRank}</td>
-                                        <td style=${{ textAlign: 'center', color: '#555' }}>${row.prevRank}</td>
+                                        <td style=${{ textAlign: 'center', color: 'var(--rs-text-secondary)' }}>${row.prevRank}</td>
                                         <td style=${{ textAlign: 'center', color: diffColor, fontWeight: 'bold' }}>
                                             ${row.diff > 0 ? `+${row.diff}` : row.diff}
                                         </td>
                                         <td>
-                                            <a href="https://old.reddit.com/r/${row.subreddit}" target="_blank" style=${{ color: COLOR.PRIMARY, fontWeight: 'bold' }}>
+                                            <a href="https://old.reddit.com/r/${row.subreddit}" target="_blank" style=${{ color: 'var(--rs-link)', fontWeight: 'bold' }}>
                                                 r/${row.subreddit}
                                             </a>
                                         </td>
                                         <td>${(row.members || 0).toLocaleString()}</td>
                                         <td style=${{ textAlign: 'right', color: subDiffColor, fontWeight: 'bold' }}>${subDiffText}</td>
-                                        <td style=${{ textAlign: 'center', color: '#d32f2f', fontWeight: 'bold' }}>${row.flags}</td>
+                                        <td style=${{ textAlign: 'center', color: 'var(--rs-color-flags)', fontWeight: 'bold' }}>${row.flags}</td>
                                         <td
                                             style=${{ maxWidth: '90px', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}
                                             title=${row.banReason}
@@ -433,10 +502,35 @@
         `;
     }
 
-    /** Settings tab — request timing controls with a persistent save button. */
-    function SettingsTab({ config, setConfig, saveSettings }) {
+    /**
+     * Settings tab — request timing controls, theme toggle, and a save button.
+     *
+     * Theme changes apply instantly and save automatically.
+     * Timing settings require clicking Save Settings.
+     */
+    function SettingsTab({ config, setConfig, saveSettings, theme, setThemeAndSave }) {
         return html`
             <div className="rs-content">
+
+                <div className="rs-input-group">
+                    <label>Theme:</label>
+                    <div className="rs-theme-toggle">
+                        <button
+                            className="rs-btn"
+                            style=${{ background: theme === 'light' ? 'var(--rs-primary)' : 'var(--rs-disabled)' }}
+                            onClick=${() => setThemeAndSave('light')}
+                        >
+                            ☀️ Light
+                        </button>
+                        <button
+                            className="rs-btn"
+                            style=${{ background: theme === 'dark' ? 'var(--rs-primary)' : 'var(--rs-disabled)' }}
+                            onClick=${() => setThemeAndSave('dark')}
+                        >
+                            🌙 Dark
+                        </button>
+                    </div>
+                </div>
 
                 <div className="rs-input-group">
                     <label>Request Delay (ms):</label>
@@ -467,7 +561,7 @@
 
                 <div style=${{ flexGrow: 1 }}></div>
 
-                <button className="rs-btn" style=${{ background: COLOR.SUCCESS }} onClick=${saveSettings}>
+                <button className="rs-btn" style=${{ background: 'var(--rs-success)' }} onClick=${saveSettings}>
                     💾 Save Settings
                 </button>
 
@@ -502,7 +596,7 @@
 
                 <div style=${{ flexGrow: 1 }}></div>
 
-                <button className="rs-btn" style=${{ background: COLOR.PRIMARY }} onClick=${handleQuickAdd}>
+                <button className="rs-btn" style=${{ background: 'var(--rs-primary)' }} onClick=${handleQuickAdd}>
                     💾 Add to Database
                 </button>
 
@@ -532,6 +626,14 @@
         const [isVisible, setIsVisible] = useState(false);
         const [activeTab, setActiveTab] = useState('dashboard');
         const [quickAddData, setQuickAddData] = useState({ subName: "", description: "" });
+
+        // --- Theme — persisted separately and applies instantly without needing Save ---
+        const [theme, setTheme] = useState(GM_getValue('redditTheme', 'light'));
+
+        const setThemeAndSave = (newTheme) => {
+            setTheme(newTheme);
+            GM_setValue('redditTheme', newTheme);
+        };
 
         // --- Settings (each persisted individually in GM storage) ---
         const [config, setConfig] = useState({
@@ -573,7 +675,7 @@
         }, []);
 
         /** Appends a coloured entry to the log pane. */
-        const addLog = (msg, color = "#333") => {
+        const addLog = (msg, color = 'var(--rs-text)') => {
             setLogs(prev => [...prev, { msg, color, id: crypto.randomUUID() }]);
         };
 
@@ -711,6 +813,7 @@
             setWaitMessage("");
             setResults([]);
             setLogs([]);
+            setProgress({ current: 0, total: 0 });
 
             // Accumulate results locally so we can push incremental updates to state
             let currentResults = [];
@@ -739,7 +842,7 @@
                         // Rate limited — wait with progressive backoff then retry the same sub
                         if (data.statusCode === 429) {
                             let delay = configRef.current.retry + (configRef.current.addRetry * (attempt - 1));
-                            addLog(`429 Rate Limited. Waiting ${delay}s...`, "orange");
+                            addLog(`429 Rate Limited. Waiting ${delay}s...`, 'var(--rs-color-caution)');
 
                             // Count down in 1s steps so the button label updates each second
                             while (delay > 0 && statusRef.current !== 'IDLE') {
@@ -760,23 +863,23 @@
 
                         // Outputting subreddit status to log
                         // Determine the color and text for the UI log based on the subreddit's state
-                        let logColor = "green"; // Default assumption: the sub is public and accessible
+                        let logColor = 'var(--rs-color-positive)'; // Default assumption: the sub is public and accessible
                         let logText = `Public (${data.members})`;
 
                         if (data.errorText) {
                             // Hard API errors (e.g., 404 Not Found, 403 Forbidden)
-                            logColor = "red";
+                            logColor = 'var(--rs-color-negative)';
                             logText = data.errorText;
 
                         } else if (data.isBanned) {
                             // Banned Status: Combines ban date and reason, dropping any empty values
-                            logColor = "red";
+                            logColor = 'var(--rs-color-negative)';
                             const banDetails = [data.banDate, data.banReason].filter(Boolean).join(' - ');
                             logText = banDetails ? `Banned (${banDetails})` : "Banned";
 
                         } else if (flagLogs.length > 0) {
                             // Flagged Status: Exists, but is Private, Restricted, or Quarantined
-                            logColor = "orange";
+                            logColor = 'var(--rs-color-caution)';
                             // Only show subscriber count if available
                             logText = data.members ? `${flagLogs.join(', ')} (${data.members})`: `${flagLogs.join(', ')}`;
                         }
@@ -798,7 +901,7 @@
                     } catch (err) {
                         // Network error — wait with an escalating delay, max 5 attempts
                         let delay = 5 * attempt;
-                        addLog(`Network Error. Waiting ${delay}s...`, "red");
+                        addLog(`Network Error. Waiting ${delay}s...`, 'var(--rs-color-negative)');
 
                         while (delay > 0 && statusRef.current !== 'IDLE') {
                             setWaitMessage(`⏳ Network Error: Waiting ${delay}s...`);
@@ -824,7 +927,7 @@
             if (statusRef.current !== 'IDLE') {
                 setSyncStatus('DONE');
                 setWaitMessage("");
-                addLog("✓ Scrape Complete! Reports ready to generate. Don't forget to commit your results to the database AFTER running reports.", "green");
+                addLog("✓ Scrape Complete! Reports ready to generate. Don't forget to commit your results to the database AFTER running reports.", 'var(--rs-color-positive)');
             }
         };
 
@@ -858,7 +961,8 @@
             GM_setValue('redditScraperHistory', JSON.stringify(newHistory));
 
             setQuickAddData({ subName: "", description: "" });
-            addLog(`✓ r/${cleanName} successfully added to the database!`, "green");
+            setActiveTab('dashboard');
+            addLog(`✓ r/${cleanName} successfully added to the database!`, 'var(--rs-color-positive)');
         };
 
         /**
@@ -899,8 +1003,9 @@
             GM_setValue('redditScraperHistory', JSON.stringify(newHistory));
 
             setResults([]);
+            setProgress({ current: 0, total: 0 });
             setSyncStatus('IDLE');
-            addLog("✓ Data successfully saved and committed to local database.", "green");
+            addLog("✓ Data successfully saved and committed to local database.", 'var(--rs-color-positive)');
         };
 
         /**
@@ -935,7 +1040,7 @@
             );
 
             // Enrich each item with ranks, diffs, and flags
-            const processed = sortedData.map(item =>
+            return sortedData.map(item =>
                 processSubredditData(
                     item,
                     history[item.subreddit] || {},
@@ -943,8 +1048,6 @@
                     prevRankMap[item.subreddit]
                 )
             );
-
-            return processed;
 
         }, [results, history]);
 
@@ -1005,7 +1108,7 @@ ${alphaNewSubs.map(item => formatMarkdownRow(item, 'alphabetical')).join('\n')}`
             else if (type === 'banned') {
                 postContent = `
 ### Banned Subs
-| Subname | F | Description | Ban Date | Reason for Ban
+| Subname | F | Description | Ban Date | Reason for Ban |
 |---|---|---|---|---|
 ${bannedSubs.map(item => formatMarkdownRow(item, 'banned')).join('\n')}`.trim();
             }
@@ -1014,7 +1117,7 @@ ${bannedSubs.map(item => formatMarkdownRow(item, 'banned')).join('\n')}`.trim();
 
             // Confirm in the log which report type was just copied
             const alertText = REPORT_LABELS[type] ?? 'League'; // Default to league table
-            addLog(`✓ ${alertText} Markdown copied to clipboard!`, COLOR.PRIMARY);
+            addLog(`✓ ${alertText} Markdown copied to clipboard!`, 'var(--rs-primary)');
         };
 
         /**
@@ -1034,7 +1137,8 @@ ${bannedSubs.map(item => formatMarkdownRow(item, 'banned')).join('\n')}`.trim();
                 let newHistory = {};
                 parseResult.data.forEach(row => {
                     // Support CSV files where the first-column header name varies
-                    const subname = (row.Subreddit || row[Object.keys(row)[0]] || "").trim().replace(/^r\//i, '');
+                    const rawName = row.Subreddit || row[Object.keys(row)[0]] || "";
+                    const subname = rawName.trim().replace(/^r\//i, '');
                     if (!subname) return;
 
                     // Only mark as new if this sub wasn't already in the database
@@ -1100,6 +1204,7 @@ ${bannedSubs.map(item => formatMarkdownRow(item, 'banned')).join('\n')}`.trim();
             }
 
             // Fallback: standard blob download.
+            // The URL must not be revoked until after the download has started.
             const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
             const url = URL.createObjectURL(blob);
             const link = document.createElement("a");
@@ -1108,7 +1213,7 @@ ${bannedSubs.map(item => formatMarkdownRow(item, 'banned')).join('\n')}`.trim();
             document.body.appendChild(link);
             link.click();
             document.body.removeChild(link);
-            URL.revokeObjectURL(url);
+            setTimeout(() => URL.revokeObjectURL(url), 1000);
         };
 
         /** Persists the current config values to GM storage. */
@@ -1139,28 +1244,28 @@ ${bannedSubs.map(item => formatMarkdownRow(item, 'banned')).join('\n')}`.trim();
 
         // Derive the action button's label and colour from the current scraper status
         let btnText = "▶ Start Scraper";
-        let btnBg = COLOR.PRIMARY;
+        let btnBg = 'var(--rs-primary)';
         let textColor = "white";
 
         if (waitMessage) {
             // A rate-limit or network-error countdown is actively ticking
             btnText = waitMessage;
-            btnBg = COLOR.WARNING;
+            btnBg = 'var(--rs-warning)';
             textColor = "black";
         } else if (status === 'RUNNING') {
             btnText = `⏸ Pause Scraper (${progress.current}/${progress.total}) (~${calculateETA(progress.total - progress.current)})`;
-            btnBg = COLOR.SUCCESS;
+            btnBg = 'var(--rs-success)';
         } else if (status === 'PAUSED') {
             btnText = `▶ Resume Scraper`;
-            btnBg = COLOR.WARNING;
+            btnBg = 'var(--rs-warning)';
             textColor = "black";
         } else if (status === 'DONE') {
             btnText = `↺ Run Again`;
-            btnBg = COLOR.PRIMARY;
+            btnBg = 'var(--rs-primary)';
         }
 
         return html`
-            <div className="rs-panel">
+            <div className=${`rs-panel ${theme === 'dark' ? 'rs-dark' : ''}`}>
                 <${Header} setIsVisible=${setIsVisible} />
                 <${Tabs} activeTab=${activeTab} setActiveTab=${setActiveTab} />
 
@@ -1201,6 +1306,8 @@ ${bannedSubs.map(item => formatMarkdownRow(item, 'banned')).join('\n')}`.trim();
                         config=${config}
                         setConfig=${setConfig}
                         saveSettings=${saveSettings}
+                        theme=${theme}
+                        setThemeAndSave=${setThemeAndSave}
                     />
                 `}
             </div>
